@@ -1,0 +1,10 @@
+node_modules/
+tu-tien-online/
+khai-khieu-thien-lo/
+TaskBarCultivation/
+*.png
+.chrome-debug-profile*/
+.craft-test-profile*/
+.port8123-test/
+.quest-test-profile/
+.visibility-test-profile/

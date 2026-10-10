@@ -1,0 +1,91 @@
+:root {
+  color-scheme: dark;
+  font-family: Georgia, "Times New Roman", serif;
+  background: #050908;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 50% 30%, #18332b 0%, #0a1612 43%, #030605 100%);
+}
+
+body {
+  display: grid;
+  place-items: center;
+  user-select: none;
+}
+
+#game-shell {
+  position: relative;
+  width: min(100vw, calc(100vh * 16 / 9));
+  height: min(100vh, calc(100vw * 9 / 16));
+  overflow: hidden;
+  background: #0b1713;
+  box-shadow: 0 0 80px rgb(0 0 0 / 70%);
+}
+
+#game-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  outline: none;
+  touch-action: none;
+}
+
+#game-canvas:focus-visible {
+  outline: 2px solid #d9bd75;
+  outline-offset: -2px;
+}
+
+#loading {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: #f0e5c4;
+  font-size: clamp(16px, 2vw, 30px);
+  letter-spacing: 0.12em;
+  background: #09130f;
+  transition: opacity 300ms ease;
+  pointer-events: none;
+}
+
+#loading.is-hidden {
+  opacity: 0;
+}
+
+#loading.has-error {
+  padding: 2rem;
+  gap: 0.8rem;
+  align-content: center;
+  text-align: center;
+  letter-spacing: normal;
+  background: #09130f;
+}
+
+#loading.has-error strong {
+  color: #f0d28b;
+  font-size: clamp(20px, 2.5vw, 36px);
+}
+
+#loading.has-error span {
+  color: #d9dfd5;
+  font-family: system-ui, sans-serif;
+  font-size: clamp(14px, 1.4vw, 20px);
+}
+
+noscript {
+  position: fixed;
+  inset: auto 1rem 1rem;
+  color: #f4dfb0;
+  text-align: center;
+}

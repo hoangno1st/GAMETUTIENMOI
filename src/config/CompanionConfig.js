@@ -1,0 +1,25 @@
+export const CompanionConfig = Object.freeze({
+  companions: Object.freeze({
+    "linh-ho-tieu-bach": Object.freeze({
+      id: "linh-ho-tieu-bach",
+      name: "Tiểu Bạch",
+      species: "Linh Hồ",
+      description: "Chú hồ ly nhỏ có linh trí, theo chân tu sĩ sau khi được cứu từ rừng linh thảo.",
+      baseHp: 50,
+      hpPerLevel: 8,
+      baseDamage: 4,
+      damagePerLevel: 1,
+      attackRange: 60,
+      attackCooldown: 2.2,
+      followDistance: 90,
+      followSpeed: 440,
+      collisionRadius: 20,
+      maxLevel: 10,
+      expPerLevel: 35,
+      color: "#e8d5b8",
+      accentColor: "#f5e6cc",
+    }),
+  }),
+  combatAssistRange: 280,
+  expShareRatio: 0.15,
+});
