@@ -5,7 +5,7 @@ export class QuestSystem {
     this.accepted = {};
     this.completed = {};
     this.trackedQuestId = null;
-    this.currentAreaId = "ngoai-mon";
+    this.currentAreaId = "thanh-van-ngoai-mon";
     this.areaNotice = null;
     this.panelOpen = false;
   }
@@ -15,7 +15,7 @@ export class QuestSystem {
     this.accepted = this.sanitizeMap(saved.accepted);
     this.completed = this.sanitizeCompleted(saved.completed);
     this.trackedQuestId = this.definitions.has(saved.trackedQuestId) ? saved.trackedQuestId : null;
-    this.currentAreaId = this.config.areas.some((area) => area.id === saved.currentAreaId) ? saved.currentAreaId : "ngoai-mon";
+    this.currentAreaId = this.config.areas.some((area) => area.id === saved.currentAreaId) ? saved.currentAreaId : "thanh-van-ngoai-mon";
     if (this.trackedQuestId && !this.accepted[this.trackedQuestId]) this.trackedQuestId = null;
     player.questState = this.getPersistentState();
   }
@@ -117,8 +117,9 @@ export class QuestSystem {
   onDeliver(itemId, quantity) { this.increment("deliver", itemId, quantity); }
   onVisit(areaId) { this.increment("visit", areaId); }
 
-  updateArea(player) {
-    const next = this.config.areas.find((area) => player.x >= area.minX && player.x <= area.maxX && player.y >= area.minY && player.y <= area.maxY);
+  updateArea(player, mapId) {
+    const areaId = mapId ?? this.currentAreaId;
+    const next = this.config.areas.find((area) => area.id === areaId) ?? this.config.areas.find((area) => player.x >= area.minX && player.x <= area.maxX && player.y >= area.minY && player.y <= area.maxY);
     if (!next || next.id === this.currentAreaId) return;
     this.currentAreaId = next.id;
     this.areaNotice = { text: next.name, life: 2.4 };

@@ -8,12 +8,16 @@ export class InventorySystem {
     this.selectedEquipmentIndex = 0;
     this.discardPending = null;
     this.messages = [];
+    this.onUse = null;
   }
 
   initializePlayer(player) {
     if (!Array.isArray(player.inventory)) player.inventory = [];
     if (!player.equipment || typeof player.equipment !== "object") {
-      player.equipment = { ...this.config.startingEquipment };
+      const classEquipment = this.config.startingEquipment[player.classId]
+        ?? this.config.startingEquipment["sword-cultivator"]
+        ?? {};
+      player.equipment = { ...classEquipment };
     }
     if (!Number.isInteger(player.coins) || player.coins < 0) player.coins = 0;
     this.attributeSystem.recalculate(player);
@@ -176,6 +180,7 @@ export class InventorySystem {
     } else return false;
     this.removeItem(player, index, 1);
     this.addMessage(`Dùng ${item.name}.`, "success");
+    this.onUse?.(item, effect);
     return true;
   }
 
@@ -185,6 +190,10 @@ export class InventorySystem {
     if (requirements.level && player.level < requirements.level) failures.push(`cần cấp ${requirements.level}`);
     if (requirements.realmId && !this.meetsRealm(player.realmId, requirements.realmId)) {
       failures.push(`cần cảnh giới ${requirements.realmId}`);
+    }
+    if (requirements.classId && requirements.classId !== player.classId) {
+      const classNames = { "sword-cultivator": "Kiếm Tu", "spirit-cultivator": "Pháp Tu" };
+      failures.push(`chỉ dành cho ${classNames[requirements.classId] ?? requirements.classId}`);
     }
     return failures;
   }

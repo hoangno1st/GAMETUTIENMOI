@@ -5,6 +5,23 @@ export class SaveSystem {
     this.currentVersion = config.version;
   }
 
+  hasSave() {
+    if (!this.storage) return false;
+    try { return Boolean(this.storage.getItem(this.storageKey)); } catch { return false; }
+  }
+
+  hasValidCharacterSave() {
+    if (!this.storage) return false;
+    try {
+      const raw = this.storage.getItem(this.storageKey);
+      if (!raw) return false;
+      const record = this.migrate(JSON.parse(raw));
+      return Boolean(record && this.hasCharacterShape(record.character));
+    } catch {
+      return false;
+    }
+  }
+
   saveCharacter(characterData) {
     if (!this.storage || !this.hasCharacterShape(characterData)) return false;
 
@@ -49,8 +66,10 @@ export class SaveSystem {
   migrate(record) {
     if (!record || typeof record !== "object") return null;
     if (record.version === this.currentVersion) return record;
-    if ([1, 2, 3, 4].includes(record.version) && this.currentVersion === 5) {
-      return { ...record, version: 5 };
+    if ([1, 2, 3, 4, 5].includes(record.version) && this.currentVersion === 6) {
+      const character = record.character ?? {};
+      if (!character.classId) character.classId = "sword-cultivator";
+      return { ...record, character, version: 6 };
     }
     return null;
   }
@@ -99,9 +118,11 @@ export class SaveSystem {
       const fallbackItem = itemConfig.items[fallback.equipment?.[slot.id]];
       equipment[slot.id] = savedItem?.type === "equipment"
         && savedItem.equipmentSlot === slot.id
-        && this.meetsItemRequirements(savedItem, characterLevel, realm.id, itemConfig)
+        && this.meetsItemRequirements(savedItem, characterLevel, realm.id, itemConfig, classData.id)
         ? savedItem.id
-        : fallbackItem?.type === "equipment" && fallbackItem.equipmentSlot === slot.id
+        : fallbackItem?.type === "equipment"
+          && fallbackItem.equipmentSlot === slot.id
+          && this.meetsItemRequirements(fallbackItem, characterLevel, realm.id, itemConfig, classData.id)
           ? fallbackItem.id
           : null;
     }
@@ -146,6 +167,7 @@ export class SaveSystem {
         practiceCompletions: this.safeInteger(data.activityState?.practiceCompletions, 0, 0, Number.MAX_SAFE_INTEGER),
       },
       companionState: this.sanitizeCompanionState(data.companionState, limits.companionConfig),
+      mapState: this.sanitizeMapState(data.mapState, limits.mapConfig),
     };
   }
 
@@ -159,7 +181,7 @@ export class SaveSystem {
   }
 
   sanitizeQuestState(data, questConfig) {
-    if (!questConfig || !data || typeof data !== "object") return { accepted: {}, completed: {}, trackedQuestId: null, currentAreaId: "ngoai-mon" };
+    if (!questConfig || !data || typeof data !== "object") return { accepted: {}, completed: {}, trackedQuestId: null, currentAreaId: "thanh-van-ngoai-mon" };
     const ids = new Set(questConfig.quests.map((quest) => quest.id));
     const accepted = {};
     for (const quest of questConfig.quests) {
@@ -172,7 +194,7 @@ export class SaveSystem {
     const completed = {};
     for (const id of Object.keys(data.completed ?? {})) if (ids.has(id)) completed[id] = true;
     const areaIds = new Set(questConfig.areas.map((area) => area.id));
-    return { accepted, completed, trackedQuestId: ids.has(data.trackedQuestId) && accepted[data.trackedQuestId] ? data.trackedQuestId : null, currentAreaId: areaIds.has(data.currentAreaId) ? data.currentAreaId : "ngoai-mon" };
+    return { accepted, completed, trackedQuestId: ids.has(data.trackedQuestId) && accepted[data.trackedQuestId] ? data.trackedQuestId : null, currentAreaId: areaIds.has(data.currentAreaId) ? data.currentAreaId : "thanh-van-ngoai-mon" };
   }
 
   sanitizeCompanionState(data, companionConfig) {
@@ -193,6 +215,26 @@ export class SaveSystem {
       assistEnabled: data.assistEnabled !== false,
       treasureCooldown: this.safeNumber(data.treasureCooldown, 0, 0, 60),
     };
+  }
+
+  sanitizeMapState(data, mapConfig) {
+    const fallback = { currentMapId: mapConfig?.defaultMapId ?? "thanh-van-ngoai-mon", discovered: {}, positions: {} };
+    if (!mapConfig || !data || typeof data !== "object") return { ...fallback, discovered: { [fallback.currentMapId]: true } };
+    const currentMapId = mapConfig.maps[data.currentMapId] ? data.currentMapId : mapConfig.defaultMapId;
+    const discovered = { [mapConfig.defaultMapId]: true }; const positions = {};
+    for (const id of Object.keys(data.discovered ?? {})) if (mapConfig.maps[id]) discovered[id] = true;
+    for (const [id, position] of Object.entries(data.positions ?? {})) { const map = mapConfig.maps[id]; if (!map) continue; positions[id] = { x: this.safeNumber(position?.x, map.entries.start?.x ?? 300, map.world.bounds.minX, map.world.bounds.maxX), y: this.safeNumber(position?.y, map.entries.start?.y ?? 1200, map.world.bounds.minY, map.world.bounds.maxY) }; }
+    const resourceIds = new Set(); const poiIds = new Set();
+    for (const map of Object.values(mapConfig.maps)) {
+      for (const node of map.resources ?? []) resourceIds.add(node.id);
+      for (const poi of map.pointsOfInterest ?? []) poiIds.add(poi.id);
+    }
+    const nodeReadyAt = {}; const discoveredPois = {};
+    for (const [id, readyAt] of Object.entries(data.exploration?.nodeReadyAt ?? {})) {
+      if (resourceIds.has(id) && Number.isFinite(readyAt) && readyAt > 0) nodeReadyAt[id] = Math.min(readyAt, Date.now() + 86400000);
+    }
+    for (const id of Object.keys(data.exploration?.discoveredPois ?? {})) if (poiIds.has(id)) discoveredPois[id] = true;
+    return { currentMapId, discovered, positions, exploration: { nodeReadyAt, discoveredPois } };
   }
 
   hasCharacterShape(data) {
@@ -217,7 +259,7 @@ export class SaveSystem {
     return inventory;
   }
 
-  meetsItemRequirements(item, level, realmId, itemConfig) {
+  meetsItemRequirements(item, level, realmId, itemConfig, classId) {
     const requirements = item.requirements ?? {};
     if (requirements.level && level < requirements.level) return false;
     if (requirements.realmId) {
@@ -225,6 +267,7 @@ export class SaveSystem {
       const requiredRank = itemConfig.realmOrder.indexOf(requirements.realmId);
       if (requiredRank >= 0 && currentRank < requiredRank) return false;
     }
+    if (requirements.classId && classId && requirements.classId !== classId) return false;
     return true;
   }
 
@@ -255,6 +298,7 @@ export class SaveSystem {
       activityState: { ...(character.activityState ?? {}) },
       questState: structuredClone(character.questState ?? {}),
       companionState: structuredClone(character.companionState ?? {}),
+      mapState: structuredClone(character.mapState ?? {}),
     };
   }
 
@@ -268,4 +312,10 @@ export class SaveSystem {
       return false;
     }
   }
+
+  loadSettings() {
+    try { const data = JSON.parse(this.storage?.getItem(`${this.storageKey}.settings`) ?? "null"); return { musicVolume: this.safeNumber(data?.musicVolume, 0.18, 0, 1), sfxVolume: this.safeNumber(data?.sfxVolume, 0.55, 0, 1), muted: data?.muted === true, showDebug: data?.showDebug === true }; } catch { return { musicVolume: 0.18, sfxVolume: 0.55, muted: false, showDebug: false }; }
+  }
+
+  saveSettings(settings) { try { this.storage?.setItem(`${this.storageKey}.settings`, JSON.stringify(settings)); return true; } catch { return false; } }
 }

@@ -6,13 +6,13 @@
     <meta name="theme-color" content="#09130f" />
     <meta
       name="description"
-      content="Thanh Vân Sơn — an original browser-based cultivation adventure prototype."
+      content="Tàn Tinh Mạch: Ký Sự Tĩnh Lam — hành trình tu luyện nguyên bản trên vùng đất mang linh mạch vỡ."
     />
-    <title>Thanh Vân Sơn — Ngoại Môn</title>
+    <title>Tàn Tinh Mạch: Ký Sự Tĩnh Lam</title>
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
-    <main id="game-shell" aria-label="Thanh Vân Sơn game">
+    <main id="game-shell" aria-label="Tàn Tinh Mạch game">
       <canvas
         id="game-canvas"
         width="1920"
@@ -20,7 +20,36 @@
         tabindex="0"
         aria-label="Game canvas. Use WASD or arrow keys to move."
       ></canvas>
-      <div id="loading" role="status">Đang khai mở sơn môn…</div>
+      <section id="character-creation" class="creation-screen" aria-labelledby="creation-title" hidden>
+        <form class="creation-panel" novalidate>
+          <header>
+            <p class="creation-kicker">TÀN TINH MẠCH · HỒ SƠ DUY NHẤT</p>
+            <h1 id="creation-title">Tạo nhân vật</h1>
+            <p>Hiện tại game chỉ hỗ trợ một nhân vật. Save hợp lệ hiện có sẽ luôn được tải thẳng và không bị màn này ghi đè.</p>
+          </header>
+          <label class="name-field" for="character-name">Tên đạo hữu
+            <input id="character-name" name="characterName" type="text" minlength="2" maxlength="20" autocomplete="off" placeholder="Ví dụ: Lâm An" aria-describedby="character-name-error" />
+          </label>
+          <p id="character-name-error" class="creation-error" aria-live="polite"></p>
+          <div class="class-grid" role="group" aria-label="Chọn lớp nhân vật">
+            <button class="class-card" type="button" data-class-id="sword-cultivator" aria-pressed="false">
+              <span class="class-preview sword-preview" aria-hidden="true"><i></i></span>
+              <strong>Kiếm Tu</strong><em>CẬN CHIẾN · CÂN BẰNG</em>
+              <span data-role="style"></span><span data-role="stats"></span><span data-role="weapon"></span><span data-role="skills"></span>
+              <b data-role="selection">Chọn môn phái</b>
+            </button>
+            <button class="class-card" type="button" data-class-id="spirit-cultivator" aria-pressed="false">
+              <span class="class-preview spell-preview" aria-hidden="true"><i></i></span>
+              <strong>Pháp Tu</strong><em>TẦM XA · LINH LỰC</em>
+              <span data-role="style"></span><span data-role="stats"></span><span data-role="weapon"></span><span data-role="skills"></span>
+              <b data-role="selection">Chọn môn phái</b>
+            </button>
+          </div>
+          <footer><button id="back-character" type="button" class="secondary-button">Quay lại / Xóa lựa chọn</button><button id="confirm-character" type="submit">Xác nhận nhập môn</button></footer>
+          <small>Phím: ← → chọn lớp · Tab di chuyển · Enter xác nhận · Esc xóa lựa chọn</small>
+        </form>
+      </section>
+      <div id="loading" role="status">Đang dẫn mạch Tĩnh Lam…</div>
     </main>
 
     <noscript>Trò chơi cần JavaScript để hoạt động.</noscript>

@@ -7,7 +7,7 @@ export class UISystem {
     this.pointerAreas = [];
   }
 
-  render(ctx, player, interaction, combat, progression, attributes, skills, inventory, quests, activities, crafting, companion, fps) {
+  render(ctx, player, interaction, combat, progression, attributes, skills, inventory, quests, activities, crafting, companion, maps, exploration, audio, fps) {
     this.pointerAreas = [];
     const resolution = this.config.resolution;
     const scale = this.config.ui.scale;
@@ -15,16 +15,21 @@ export class UISystem {
     ctx.translate(resolution.width / 2, resolution.height / 2);
     ctx.scale(scale, scale);
     ctx.translate(-resolution.width / 2, -resolution.height / 2);
-    this.drawLocation(ctx);
+    this.drawLocation(ctx, maps.currentMap);
+    this.drawMiniMap(ctx, player, maps);
+    this.drawExplorationMap(ctx, player, maps, exploration, quests);
     this.drawCharacterPanel(ctx, player, progression);
     this.drawInventoryHudButton(ctx, player, inventory);
     this.drawQuestHud(ctx, quests);
     this.drawCompanionHud(ctx, companion, player);
-    if (this.config.ui.showCoordinates || this.config.ui.showFps) {
+    if (this.showDebug && (this.config.ui.showCoordinates || this.config.ui.showFps)) {
       this.drawCoordinates(ctx, player, fps);
     }
+    if (this.showDebug) this.drawEntityCounts(ctx, maps.debugCounts);
     this.drawCombatBar(ctx, player, combat, skills);
-    if (player.defeated) this.drawDefeatOverlay(ctx, combat);
+    if (maps.worldMapOpen) this.drawWorldMap(ctx, player, maps);
+    else if (audio.panelOpen) this.drawAudioPanel(ctx, audio);
+    else if (player.defeated) this.drawDefeatOverlay(ctx, combat);
     else if (companion.panelOpen) this.drawCompanionPanel(ctx, player, companion);
     else if (crafting.panelOpen) this.drawCraftingPanel(ctx, player, crafting, inventory);
     else if (activities.panelOpen) this.drawActivityPanel(ctx, player, activities);
@@ -38,8 +43,21 @@ export class UISystem {
     this.drawNotifications(ctx, progression.notifications);
     this.drawSkillFeedback(ctx, skills.feedback);
     this.drawInventoryMessages(ctx, inventory.messages);
+    this.drawExplorationProgress(ctx, exploration);
+    this.drawLowHpWarning(ctx, player);
+    if (maps.nameNotice > 0) this.drawMapNotice(ctx, maps.currentMap.name);
+    if (maps.fade > 0) { ctx.fillStyle = `rgb(2 8 7 / ${Math.min(0.75, maps.fade)})`; ctx.fillRect(0, 0, resolution.width, resolution.height); }
     ctx.restore();
   }
+
+  drawAudioPanel(ctx, audio) {
+    const x=610,y=270,w=700,h=500; ctx.save(); ctx.fillStyle="rgb(5 17 13 / 97%)"; ctx.beginPath(); ctx.roundRect(x,y,w,h,24); ctx.fill(); ctx.strokeStyle="#cdb368"; ctx.lineWidth=3; ctx.stroke(); ctx.fillStyle="#f1e3b8"; ctx.font="600 34px Georgia, serif"; ctx.fillText("Âm thanh & Hiển thị",x+42,y+62);
+    const rows=[`Nhạc nền: ${Math.round(audio.settings.musicVolume*100)}%`,`Hiệu ứng: ${Math.round(audio.settings.sfxVolume*100)}%`,`Tắt âm: ${audio.settings.muted?"CÓ":"KHÔNG"}`]; rows.forEach((text,index)=>{ctx.fillStyle=index===audio.selected?"#e9cd78":"#c9d7ce";ctx.font="22px system-ui, sans-serif";ctx.fillText(`${index===audio.selected?"▶":"  "} ${text}`,x+70,y+145+index*70);}); ctx.fillStyle="#a9c8b4";ctx.font="17px system-ui, sans-serif";ctx.fillText("Âm thanh chỉ bắt đầu sau lần bấm phím hoặc chuột đầu tiên.",x+70,y+390);ctx.fillStyle="#c9b776";ctx.fillText("↑↓ Chọn · ←→ Điều chỉnh · ENTER Bật/tắt · O/ESC Đóng",x+70,y+h-42);ctx.restore();
+  }
+
+  drawLowHpWarning(ctx, player) { if (player.defeated || player.hp/player.maxHp>.25) return; const pulse=.45+Math.sin(performance.now()/180)*.18; ctx.save();ctx.strokeStyle=`rgb(222 83 68 / ${pulse})`;ctx.lineWidth=10;ctx.strokeRect(7,7,1906,1066);ctx.fillStyle="#ffad98";ctx.font="700 17px system-ui, sans-serif";ctx.textAlign="center";ctx.fillText("⚠ KHÍ HUYẾT NGUY CẤP",960,1015);ctx.restore(); }
+
+  drawEntityCounts(ctx, counts={}) { ctx.save();ctx.fillStyle="rgb(5 17 13 / 72%)";ctx.fillRect(1550,78,336,28);ctx.fillStyle="#9fc5ad";ctx.font="13px ui-monospace, monospace";ctx.fillText(`F3 Ẩn · Quái ${counts.enemies??0} · Loot ${counts.loot??0} · FX ${counts.effects??0}`,1562,97);ctx.restore(); }
 
   drawActivityPanel(ctx, player, system) {
     const x = 500; const y = 260; const width = 920; const height = 510;
@@ -157,7 +175,7 @@ export class UISystem {
     ctx.restore();
   }
 
-  drawLocation(ctx) {
+  drawLocation(ctx, currentMap) {
     ctx.save();
     ctx.textAlign = "center";
     ctx.fillStyle = "rgb(7 20 16 / 72%)";
@@ -169,12 +187,54 @@ export class UISystem {
     ctx.stroke();
     ctx.fillStyle = "#f1e6c6";
     ctx.font = "600 32px Georgia, serif";
-    ctx.fillText(this.config.world.locationName, 960, 80);
+    ctx.fillText(currentMap?.name ?? this.config.world.locationName, 960, 80);
     ctx.fillStyle = "#a9c8b4";
     ctx.font = "18px Georgia, serif";
-    ctx.fillText("SƠN MÔN TĨNH LẶNG · LINH KHÍ ÔN HÒA", 960, 108);
+    ctx.fillText(`Cấp đề nghị ${currentMap?.recommendedLevel ?? "1–3"} · ${currentMap?.requiredRealmId ?? "qi-refining"}`, 960, 108);
     ctx.restore();
   }
+
+  drawMiniMap(ctx, player, maps) {
+    const map = maps.currentMap; const x = 1550; const y = 410; const width = 336; const height = 150;
+    ctx.save(); ctx.fillStyle = "rgb(7 20 16 / 80%)"; ctx.beginPath(); ctx.roundRect(x, y, width, height, 16); ctx.fill(); ctx.strokeStyle = "rgb(218 190 112 / 58%)"; ctx.stroke();
+    ctx.fillStyle = "#e9cd78"; ctx.font = "600 17px Georgia, serif"; ctx.fillText("M · Bản đồ", x + 16, y + 26);
+    ctx.strokeStyle = "#b8a97b"; ctx.lineWidth = 5; ctx.beginPath(); ctx.moveTo(x + 30, y + 92); ctx.lineTo(x + width - 30, y + 92); ctx.stroke();
+    const px = x + 30 + (player.x / map.world.width) * (width - 60); ctx.fillStyle = "#f4df75"; ctx.beginPath(); ctx.arc(px, y + 92, 9, 0, Math.PI * 2); ctx.fill();
+    for (const exit of map.exits) { const ex = x + 30 + (exit.x / map.world.width) * (width - 60); ctx.fillStyle = "#8fd1ac"; ctx.fillRect(ex - 5, y + 75, 10, 34); }
+    ctx.fillStyle = "#c9d7ce"; ctx.font = "14px system-ui, sans-serif"; ctx.fillText(`Lối ra: ${map.exits.length}`, x + 16, y + 132); ctx.restore();
+  }
+
+  drawExplorationMap(ctx, player, maps, exploration, quests) {
+    const map = maps.currentMap; const x = 1530; const y = 410; const width = 356; const height = 210; const innerX = x + 18; const innerY = y + 42; const innerW = width - 36; const innerH = 125;
+    const marker = (worldX, worldY) => ({ x: innerX + (worldX / map.world.width) * innerW, y: innerY + (worldY / map.world.height) * innerH });
+    ctx.save(); ctx.fillStyle = "rgb(7 20 16 / 94%)"; ctx.beginPath(); ctx.roundRect(x, y, width, height, 16); ctx.fill(); ctx.strokeStyle = "rgb(218 190 112 / 68%)"; ctx.stroke();
+    ctx.fillStyle = "#e9cd78"; ctx.font = "600 17px Georgia, serif"; ctx.fillText(`M · Bản đồ · Cấp ${map.recommendedLevel}`, x + 16, y + 26);
+    ctx.fillStyle = "rgb(205 193 148 / 18%)"; ctx.fillRect(innerX, innerY, innerW, innerH); ctx.strokeStyle = "#b8a97b"; ctx.lineWidth = 4; ctx.beginPath(); ctx.moveTo(innerX + 8, innerY + innerH / 2); ctx.lineTo(innerX + innerW - 8, innerY + innerH / 2); ctx.stroke();
+    for (const exit of map.exits) { const p = marker(exit.x, exit.y); ctx.fillStyle = "#8fd1ac"; ctx.fillRect(p.x - 6, p.y - 10, 12, 20); ctx.fillStyle = "#d8e6d8"; ctx.font = "10px system-ui, sans-serif"; ctx.fillText("EXIT", p.x - 13, p.y - 13); }
+    for (const npc of map.npcSpawns ?? []) { const p = marker(npc.x, npc.y); ctx.fillStyle = "#75acd0"; ctx.fillRect(p.x - 4, p.y - 4, 8, 8); const action = quests.getNpcQuestAction(npc.id, player); if (action) { ctx.fillStyle = action.type === "turnIn" ? "#8fd1ac" : "#f0cf72"; ctx.fillText(action.type === "turnIn" ? "?" : "!", p.x - 3, p.y - 7); } }
+    for (const poi of map.pointsOfInterest ?? []) { const p = marker(poi.x, poi.y); const discovered = exploration.discoveredPois[poi.id]; ctx.fillStyle = discovered ? "#d5bd79" : "#78817c"; ctx.fillText(discovered ? (poi.icon ?? "◇") : "?", p.x - 5, p.y + 5); }
+    for (const resource of map.resources ?? []) { const p = marker(resource.x, resource.y); ctx.fillStyle = "#93c77d"; ctx.fillText("✦", p.x - 5, p.y + 5); }
+    const position = marker(player.x, player.y); ctx.fillStyle = "#fff08a"; ctx.beginPath(); ctx.arc(position.x, position.y, 7, 0, Math.PI * 2); ctx.fill(); ctx.strokeStyle = "#17251f"; ctx.lineWidth = 2; ctx.stroke();
+    ctx.fillStyle = "#c9d7ce"; ctx.font = "12px system-ui, sans-serif"; ctx.fillText("● Bạn   EXIT Lối ra   ! Nhiệm vụ   ✦ Tài nguyên   ◇ Khám phá", x + 15, y + 193); ctx.restore();
+  }
+
+  drawExplorationProgress(ctx, exploration) {
+    if (!exploration) return;
+    if (exploration.gathering) {
+      const gathering = exploration.gathering; const ratio = Math.min(1, gathering.elapsed / gathering.duration);
+      ctx.save(); ctx.fillStyle = "rgb(5 17 13 / 90%)"; ctx.beginPath(); ctx.roundRect(690, 850, 540, 70, 16); ctx.fill(); this.drawBar(ctx, 720, 875, 480, 25, ratio, "#72aa78", `${gathering.node.interactionLabel} ${gathering.node.name} · ${Math.round(ratio * 100)}%`); ctx.restore();
+    } else if (exploration.messageTime > 0 && exploration.message) {
+      ctx.save(); ctx.textAlign = "center"; ctx.fillStyle = "rgb(5 17 13 / 86%)"; ctx.beginPath(); ctx.roundRect(650, 850, 620, 58, 14); ctx.fill(); ctx.fillStyle = "#e9d99e"; ctx.font = "18px system-ui, sans-serif"; ctx.fillText(exploration.message, 960, 886); ctx.restore();
+    }
+  }
+
+  drawWorldMap(ctx, player, maps) {
+    ctx.save(); ctx.fillStyle = "rgb(3 12 9 / 94%)"; ctx.fillRect(0, 0, 1920, 1080); ctx.fillStyle = "#f1e3b8"; ctx.font = "600 38px Georgia, serif"; ctx.textAlign = "center"; ctx.fillText("Thiên Hạ Đồ", 960, 120);
+    const order = maps.config.order; const spacing = Math.min(365, (1920 - 460) / Math.max(order.length - 1, 1)); order.forEach((id, index) => { const map = maps.config.maps[id]; const discovered = maps.discovered[id]; const unlocked = maps.canEnter(map, player); const x = 230 + index * spacing; const y = 420 + (index % 2) * 130; if (index < order.length - 1) { ctx.strokeStyle = discovered ? "#9a8959" : "#46504b"; ctx.lineWidth = 8; ctx.beginPath(); ctx.moveTo(x + 150, y); ctx.lineTo(x + spacing, 420 + ((index + 1) % 2) * 130); ctx.stroke(); } ctx.fillStyle = id === maps.currentMapId ? "#496f5c" : discovered ? "#253c32" : "#202825"; ctx.beginPath(); ctx.roundRect(x - 145, y - 75, 290, 150, 18); ctx.fill(); ctx.strokeStyle = unlocked ? "#d5bd79" : "#6b716d"; ctx.stroke(); ctx.fillStyle = discovered ? "#f0dfaa" : "#777f79"; ctx.font = "600 20px Georgia, serif"; ctx.fillText(discovered ? map.name : "??? · Chưa khám phá", x, y - 20); ctx.font = "15px system-ui, sans-serif"; ctx.fillText(`Cấp ${map.recommendedLevel}`, x, y + 15); ctx.fillText(unlocked ? `Cảnh giới: ${map.requiredRealmId}` : `Khóa · Cần cấp ${map.requiredLevel}`, x, y + 43); });
+    ctx.fillStyle = "#c9b776"; ctx.font = "18px system-ui, sans-serif"; ctx.fillText("M hoặc ESC · Đóng", 960, 930); ctx.restore();
+  }
+
+  drawMapNotice(ctx, name) { ctx.save(); ctx.textAlign = "center"; ctx.fillStyle = "rgb(7 20 16 / 82%)"; ctx.beginPath(); ctx.roundRect(610, 180, 700, 72, 18); ctx.fill(); ctx.fillStyle = "#f2dfa1"; ctx.font = "700 30px Georgia, serif"; ctx.fillText(name, 960, 226); ctx.restore(); }
 
   drawCharacterPanel(ctx, player, progression) {
     const x = 34;
@@ -196,7 +256,7 @@ export class UISystem {
     ctx.fillText(`Cấp ${player.level}  ·  ${player.realm}`, x + 28, y + 76);
 
     this.drawBar(ctx, x + 28, y + 103, 444, 39, player.hp / player.maxHp, "#a6423b", `HP  ${player.hp} / ${player.maxHp}`);
-    this.drawBar(ctx, x + 28, y + 156, 444, 39, player.mp / player.maxMp, "#397aa5", `MP  ${player.mp} / ${player.maxMp}`);
+    this.drawBar(ctx, x + 28, y + 156, 444, 39, player.mp / player.maxMp, "#397aa5", `MP  ${Math.floor(player.mp)} / ${player.maxMp}`);
     const requiredExp = progression.getRequiredExperience(player.level);
     const expRatio = requiredExp > 0 ? player.exp / requiredExp : 1;
     const expLabel = requiredExp > 0 ? `EXP  ${player.exp} / ${requiredExp}` : "EXP  CẤP TỐI ĐA";
@@ -322,26 +382,30 @@ export class UISystem {
   }
 
   drawCombatBar(ctx, player, combat, skillSystem) {
+    const classData = skillSystem.getClass(player);
+    const basicLabel = classData.basicAttack.name;
     this.drawSkillButton(ctx, {
       x: 590,
       y: 866,
       width: 165,
       height: 88,
       key: "J / LMB",
-      label: "Kiếm thức",
-      color: "#b99b59",
+      label: basicLabel,
+      color: classData.basicAttack.projectile ? "#597ab9" : "#b99b59",
       remaining: combat.basicCooldownRemaining,
       duration: combat.basicCooldownDuration,
     });
-    const skills = skillSystem.getClass(player).skills;
+    const skills = classData.skills;
+    const skillWidth = skills.length > 3 ? 150 : 165;
+    const skillGap = skills.length > 3 ? 158 : 185;
     skills.forEach((skill, index) => {
       const level = skillSystem.getSkillLevel(player, skill);
       const levelData = skillSystem.getLevelData(player, skill);
       const usable = player.level >= skill.requiredLevel && level > 0;
       this.drawSkillButton(ctx, {
-        x: 775 + index * 185,
+        x: 775 + index * skillGap,
         y: 866,
-        width: 165,
+        width: skillWidth,
         height: 88,
         key: skill.keyLabel,
         label: skill.name,
@@ -584,7 +648,8 @@ export class UISystem {
 
     ctx.fillStyle = "#f0e2b7";
     ctx.font = "600 34px Georgia, serif";
-    ctx.fillText(`Kiếm Kỹ · ${classData.name}`, x + 34, y + 50);
+    const panelTitle = classData.basicAttack?.projectile ? "Pháp Thuật" : "Kiếm Kỹ";
+    ctx.fillText(`${panelTitle} · ${classData.name}`, x + 34, y + 50);
     ctx.fillStyle = "#d7bd70";
     ctx.font = "20px system-ui, sans-serif";
     ctx.fillText(`Điểm kỹ năng chưa dùng: ${player.skillPoints}`, x + 34, y + 86);
@@ -592,8 +657,9 @@ export class UISystem {
     ctx.font = "17px system-ui, sans-serif";
     ctx.fillText(`${classData.passive.name}: ${classData.passive.description}`, x + 34, y + 116);
 
+    const rowStep = classData.skills.length > 3 ? 148 : 178;
     classData.skills.forEach((skill, index) => {
-      const rowY = y + 155 + index * 178;
+      const rowY = y + 155 + index * rowStep;
       const selected = skillSystem.selectedIndex === index;
       const level = skillSystem.getSkillLevel(player, skill);
       const data = skillSystem.getLevelData(player, skill);
@@ -601,7 +667,7 @@ export class UISystem {
       if (selected) {
         ctx.fillStyle = "rgb(71 119 96 / 48%)";
         ctx.beginPath();
-        ctx.roundRect(x + 22, rowY - 26, width - 44, 158, 15);
+        ctx.roundRect(x + 22, rowY - 26, width - 44, rowStep - 10, 15);
         ctx.fill();
       }
       ctx.fillStyle = status === "locked" ? "#777f79" : status === "max" ? "#e7ca73" : "#e9eedf";
@@ -611,7 +677,8 @@ export class UISystem {
       ctx.fillStyle = status === "locked" ? "#8c918d" : "#bcd0c3";
       ctx.fillText(skill.description, x + 38, rowY + 30);
       ctx.fillText(`Yêu cầu cấp ${skill.requiredLevel} · Hồi ${data.cooldown}s · ${data.mpCost} MP · Tầm ${data.range}`, x + 38, rowY + 60);
-      ctx.fillText(`Sát thương gốc ${data.damage} · Hiệu ứng ${skill.effect}`, x + 38, rowY + 88);
+      const durationText = data.effectDuration ? ` · Duy trì ${data.effectDuration}s` : "";
+      ctx.fillText(`Sát thương gốc ${data.damage}${durationText} · ${skill.targeting?.mode ?? skill.targetMode}`, x + 38, rowY + 88);
       const cost = skillSystem.getUpgradeCost(player, skill);
       const statusText = status === "locked"
         ? `KHÓA — cần cấp ${skill.requiredLevel}`

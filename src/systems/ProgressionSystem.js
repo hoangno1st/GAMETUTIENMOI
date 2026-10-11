@@ -8,6 +8,7 @@ export class ProgressionSystem {
     this.effects = [];
     this.floatingTexts = [];
     this.notifications = [];
+    this.onEvent = null;
   }
 
   getRequiredExperience(level) {
@@ -23,6 +24,7 @@ export class ProgressionSystem {
     if (!Number.isFinite(amount) || amount <= 0) return;
     player.exp += Math.floor(amount);
     this.floatingTexts.push({ text: `+${Math.floor(amount)} EXP`, x, y, life: 1.1, duration: 1.1 });
+    if (this.floatingTexts.length > 24) this.floatingTexts.splice(0, this.floatingTexts.length - 24);
     this.processLevelUps(player);
   }
 
@@ -36,7 +38,7 @@ export class ProgressionSystem {
   }
 
   applyLevelUp(player, silent = false) {
-    const growth = this.config.growthPerLevel;
+    const growth = this.attributeSystem.getClass(player).growthPerLevel ?? this.config.growthPerLevel;
     player.level += 1;
     player.baseMaxHp += growth.maxHp;
     player.baseMaxMp += growth.maxMp;
@@ -55,6 +57,7 @@ export class ProgressionSystem {
     if (!silent) {
       this.effects.push({ kind: "level-up", x: player.x, y: player.y, life: 1, duration: 1 });
       this.addNotification(`Đột phá tu vi: Cấp ${player.level}`, "level");
+      this.onEvent?.("level-up", player.x, player.y);
     }
   }
 
@@ -94,6 +97,7 @@ export class ProgressionSystem {
     this.breakthroughMessage = `Đột phá thành công: ${player.realm}`;
     this.effects.push({ kind: "breakthrough", x: player.x, y: player.y, life: 1.35, duration: 1.35 });
     this.addNotification(`Cảnh giới mới: ${player.realm}`, "breakthrough");
+    this.onEvent?.("breakthrough", player.x, player.y);
     return true;
   }
 
@@ -188,6 +192,7 @@ export class ProgressionSystem {
   }
 
   update(deltaTime) {
+    if (this.effects.length > 16) this.effects.splice(0, this.effects.length - 16);
     for (const effect of this.effects) effect.life -= deltaTime;
     this.effects = this.effects.filter((effect) => effect.life > 0);
     for (const text of this.floatingTexts) {

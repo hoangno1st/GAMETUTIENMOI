@@ -1,5 +1,5 @@
 export class NPC {
-  constructor({ id, name, title, x, y, color, dialogue, questGiver = false }) {
+  constructor({ id, name, title, x, y, color, dialogue, questGiver = false, serviceType = "dialogue", interactionRange = 165, availability = null }) {
     this.id = id;
     this.type = "npc";
     this.name = name;
@@ -9,6 +9,9 @@ export class NPC {
     this.color = color;
     this.dialogue = dialogue;
     this.questGiver = questGiver;
+    this.serviceType = serviceType;
+    this.interactionRange = interactionRange;
+    this.availability = availability;
     this.interactionLabel = "Trò chuyện";
   }
 

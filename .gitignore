@@ -8,3 +8,7 @@ TaskBarCultivation/
 .port8123-test/
 .quest-test-profile/
 .visibility-test-profile/
+.edge-maps-test/
+.maps-test-profile*/
+.originality-browser-test*/
+__pycache__/

@@ -1,0 +1,13 @@
+export class MapSystem {
+  constructor(config, realmOrder) { this.config = config; this.realmOrder = realmOrder; this.currentMapId = config.defaultMapId; this.discovered = { [config.defaultMapId]: true }; this.positions = {}; this.pendingExit = null; this.fade = 0; this.nameNotice = 2.5; this.worldMapOpen = false; }
+  get currentMap() { return this.config.maps[this.currentMapId]; }
+  initializePlayer(player) { const saved = player.mapState ?? {}; this.currentMapId = this.config.maps[saved.currentMapId] ? saved.currentMapId : this.config.defaultMapId; this.discovered = { [this.config.defaultMapId]: true }; for (const id of Object.keys(saved.discovered ?? {})) if (this.config.maps[id]) this.discovered[id] = true; this.positions = {}; for (const [id, position] of Object.entries(saved.positions ?? {})) if (this.config.maps[id] && Number.isFinite(position?.x) && Number.isFinite(position?.y)) this.positions[id] = { x: position.x, y: position.y }; }
+  getPersistentState(player) { return { currentMapId: this.currentMapId, discovered: { ...this.discovered }, positions: { ...this.positions, [this.currentMapId]: { x: player.x, y: player.y } } }; }
+  getExitObjects() { return this.currentMap.exits.map((exit) => ({ ...exit, type: "map-exit", name: exit.label, interactionLabel: "Đi tới" })); }
+  canEnter(map, player) { const currentRealm = this.realmOrder.indexOf(player.realmId); const requiredRealm = this.realmOrder.indexOf(map.requiredRealmId); return player.level >= map.requiredLevel && (requiredRealm < 0 || currentRealm >= requiredRealm); }
+  prepare(exit, player) { const destination = this.config.maps[exit.targetMapId]; if (!destination) return null; const locked = !this.canEnter(destination, player); this.pendingExit = locked ? null : exit; return { speaker: exit.label, title: locked ? "Lối đi chưa mở" : `Đi tới ${destination.name}`, text: `${destination.name} · Cấp đề nghị ${destination.recommendedLevel} · Cảnh giới ${destination.requiredRealmId}.${locked ? ` Cần đạt cấp ${destination.requiredLevel}.` : " Nhấn E lần nữa để lên đường; ESC để hủy."}` }; }
+  transition(player) { if (!this.pendingExit) return null; const exit = this.pendingExit; const previous = this.currentMapId; this.positions[previous] = { x: player.x, y: player.y }; this.currentMapId = exit.targetMapId; this.discovered[this.currentMapId] = true; const map = this.currentMap; const entry = map.entries[exit.targetEntryId] ?? Object.values(map.entries)[0]; this.pendingExit = null; this.fade = 1; this.nameNotice = 2.5; return { map, entry }; }
+  cancel() { this.pendingExit = null; }
+  update(dt) { this.fade = Math.max(0, this.fade - dt * 1.8); this.nameNotice = Math.max(0, this.nameNotice - dt); }
+  toggleWorldMap() { this.worldMapOpen = !this.worldMapOpen; }
+}

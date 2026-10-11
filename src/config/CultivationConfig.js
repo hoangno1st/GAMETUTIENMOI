@@ -31,7 +31,7 @@ export const CultivationConfig = Object.freeze({
   realms: Object.freeze([
     Object.freeze({
       id: "qi-refining",
-      name: "Luyện Khí",
+      name: "Dẫn Mạch",
       stages: Object.freeze([
         Object.freeze({ id: "early", name: "Sơ Kỳ", entryLevel: 1, subLevels: 3 }),
         Object.freeze({ id: "middle", name: "Trung Kỳ", entryLevel: 4, subLevels: 3 }),
@@ -40,7 +40,7 @@ export const CultivationConfig = Object.freeze({
     }),
     Object.freeze({
       id: "foundation-forging",
-      name: "Trúc Cơ",
+      name: "Kết Mạch",
       stages: Object.freeze([
         Object.freeze({ id: "early", name: "Sơ Kỳ", entryLevel: 10, subLevels: 3 }),
         Object.freeze({ id: "middle", name: "Trung Kỳ", entryLevel: 13, subLevels: 3 }),
@@ -49,7 +49,7 @@ export const CultivationConfig = Object.freeze({
     }),
     Object.freeze({
       id: "golden-core",
-      name: "Kim Đan",
+      name: "Tinh Hạch",
       stages: Object.freeze([
         Object.freeze({ id: "early", name: "Sơ Kỳ", entryLevel: 19, subLevels: 3 }),
         Object.freeze({ id: "middle", name: "Trung Kỳ", entryLevel: 22, subLevels: 3 }),
@@ -58,7 +58,7 @@ export const CultivationConfig = Object.freeze({
     }),
     Object.freeze({
       id: "nascent-spirit",
-      name: "Nguyên Anh",
+      name: "Mạch Linh",
       stages: Object.freeze([
         Object.freeze({ id: "early", name: "Sơ Kỳ", entryLevel: 28, subLevels: 3 }),
         Object.freeze({ id: "middle", name: "Trung Kỳ", entryLevel: 31, subLevels: 3 }),

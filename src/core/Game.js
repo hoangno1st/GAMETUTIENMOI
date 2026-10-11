@@ -3,7 +3,6 @@ import { CultivationConfig } from "../config/CultivationConfig.js";
 import { ClassConfig } from "../config/ClassConfig.js";
 import { ItemConfig } from "../config/ItemConfig.js";
 import { createCultivatorSprites } from "../assets/ProceduralSprites.js";
-import { Enemy } from "../entities/Enemy.js";
 import { NPC } from "../entities/NPC.js";
 import { Player } from "../entities/Player.js";
 import { Renderer } from "../systems/Renderer.js";
@@ -26,6 +25,15 @@ import { CultivationActivitySystem } from "../systems/CultivationActivitySystem.
 import { CraftingSystem } from "../systems/CraftingSystem.js";
 import { CompanionConfig } from "../config/CompanionConfig.js";
 import { CompanionSystem } from "../systems/CompanionSystem.js";
+import { MapConfig } from "../config/MapConfig.js";
+import { MapSystem } from "../systems/MapSystem.js";
+import { EnemyConfig } from "../config/EnemyConfig.js";
+import { MapEnemySystem } from "../systems/MapEnemySystem.js";
+import { ExplorationSystem } from "../systems/ExplorationSystem.js";
+import { AudioSystem } from "../systems/AudioSystem.js";
+import { ContentRegistry } from "../config/ContentRegistry.js";
+import { validateContent, reportContentValidation } from "../systems/ContentValidator.js";
+import { AdminPanel } from "../systems/AdminPanel.js";
 
 function getLocalStorageSafely() {
   try {
@@ -39,13 +47,56 @@ function getLocalStorageSafely() {
 export class Game {
   constructor(canvas) {
     this.config = GameConfig;
+    this.developmentMode = ["localhost", "127.0.0.1", ""].includes(window.location.hostname);
+    this.contentValidation = this.developmentMode
+      ? reportContentValidation(validateContent(ContentRegistry, {
+        realmIds: new Set(CultivationConfig.realms.map((realm) => realm.id)),
+        companions: CompanionConfig.companions,
+        recipes: CraftingConfig.recipes,
+      }))
+      : null;
+    if (this.contentValidation && !this.contentValidation.valid) throw new Error("Dữ liệu nội dung không hợp lệ; xem Console để biết đường dẫn lỗi.");
+    this.canvas = canvas;
     this.input = new Input(window, canvas, GameConfig.input);
     this.renderer = new Renderer(
       canvas,
       GameConfig.resolution.width,
       GameConfig.resolution.height,
     );
-    this.world = new WorldSystem(GameConfig.world);
+    this.saveSystem = new SaveSystem(getLocalStorageSafely(), GameConfig.save);
+    this.settings = this.saveSystem.loadSettings();
+    this.audioSystem = new AudioSystem(this.settings);
+
+    this.classSelectionActive = false;
+    this.classSelectionIndex = 0;
+    this.classIds = Object.keys(ClassConfig.classes);
+    this.creationName = "";
+
+    const hasSave = this.saveSystem.hasValidCharacterSave();
+    if (!hasSave) {
+      this.classSelectionActive = true;
+      this.setupCharacterCreation();
+      this.previousTime = 0;
+      this.fps = 60;
+      this.frameCount = 0;
+      this.fpsElapsed = 0;
+      this.isRunning = false;
+      this.frame = this.frame.bind(this);
+      this.onPageHide = () => {};
+      return;
+    }
+
+    this.initializeGame(ClassConfig.defaultClassId);
+  }
+
+  initializeGame(classId, newCharacterName = null) {
+    this.classSelectionActive = false;
+    this.teardownCharacterCreation();
+    this.mapSystem = new MapSystem(MapConfig, ItemConfig.realmOrder);
+    this.enemySpawnSystem = new MapEnemySystem(EnemyConfig);
+    this.explorationSystem = new ExplorationSystem(GameConfig.npcs.interactionRange);
+    this.world = new WorldSystem(this.mapSystem.currentMap.world, this.mapSystem.currentMap);
+    this.explorationSystem.loadMap(this.world.specialObjects);
     this.attributeSystem = new AttributeSystem(ClassConfig, ItemConfig);
     this.progression = new ProgressionSystem(CultivationConfig, this.attributeSystem);
     this.skillSystem = new SkillSystem(ClassConfig);
@@ -56,6 +107,7 @@ export class Game {
     this.companionSystem = new CompanionSystem();
     this.inventorySystem.onItemAdded = (itemId, quantity) => this.questSystem.onCollect(itemId, quantity);
     this.ui = new UISystem(GameConfig, CultivationConfig, ClassConfig, ItemConfig);
+    this.selectedClassId = classId;
     this.player = new Player(
       GameConfig.player,
       createCultivatorSprites(GameConfig.sprites.sourceSize),
@@ -65,12 +117,25 @@ export class Game {
       CultivationConfig,
       ClassConfig,
       ItemConfig,
+      classId,
     );
-    this.saveSystem = new SaveSystem(getLocalStorageSafely(), GameConfig.save);
+    this.inventorySystem.onUse = () => this.audioSystem.play("heal");
+    this.ui.showDebug = this.settings.showDebug;
+    this.progression.onEvent = (kind) => { this.audioSystem.play(kind === "breakthrough" ? "breakthrough" : "quest"); if (kind === "breakthrough") this.camera?.shake(11, 0.32); };
     this.restoreCharacter();
+    if (newCharacterName !== null) this.player.name = newCharacterName;
+    this.world = new WorldSystem(this.mapSystem.currentMap.world, this.mapSystem.currentMap);
+    this.audioSystem.desiredTheme = this.mapSystem.currentMap.world.theme;
+    this.explorationSystem.loadMap(this.world.specialObjects);
+    this.player.worldConfig = this.mapSystem.currentMap.world;
+    if (this.player.collidesWithObstacle(this.world.obstacles)) {
+      const fallbackEntry = this.mapSystem.currentMap.entries.start ?? Object.values(this.mapSystem.currentMap.entries)[0];
+      this.player.x = fallbackEntry.x; this.player.y = fallbackEntry.y; this.player.spawnX = fallbackEntry.x; this.player.spawnY = fallbackEntry.y;
+    }
     this.npcs = this.createNpcs();
     this.enemies = this.createEnemies();
     this.lootSystem = new LootSystem(ItemConfig, this.inventorySystem);
+    this.lootSystem.onPickup = () => this.audioSystem.play("pickup");
     this.interaction = new InteractionSystem(GameConfig.npcs.interactionRange);
     this.combat = new CombatSystem(
       this.skillSystem.getClass(this.player).basicAttack,
@@ -84,6 +149,9 @@ export class Game {
         }
       },
     );
+    this.combat.maxEffects = GameConfig.feedback.maxCombatEffects;
+    this.combat.maxFloatingTexts = GameConfig.feedback.maxFloatingTexts;
+    this.combat.onEvent = (kind) => { this.audioSystem.play(kind === "player-hit" || kind === "player-defeat" ? "hit" : kind); if (kind === "player-defeat" || kind === "defeat") this.camera?.shake(kind === "player-defeat" ? 10 : 5, 0.2); };
     this.camera = new Camera(
       GameConfig.resolution.width,
       GameConfig.resolution.height,
@@ -94,21 +162,138 @@ export class Game {
     this.camera.snapTo(this.player);
 
     this.resetConfirmOpen = false;
-    this.previousTime = 0;
-    this.fps = 60;
-    this.frameCount = 0;
-    this.fpsElapsed = 0;
-    this.isRunning = false;
+    if (!this.previousTime) this.previousTime = 0;
+    if (!this.fps) this.fps = 60;
+    this.frameCount = this.frameCount ?? 0;
+    this.fpsElapsed = this.fpsElapsed ?? 0;
+    this.isRunning = this.isRunning ?? false;
     this.autosaveElapsed = 0;
-    this.frame = this.frame.bind(this);
+    if (!this._frameBound) { this.frame = this.frame.bind(this); this._frameBound = true; }
+    if (this.onPageHide) window.removeEventListener("pagehide", this.onPageHide);
     this.onPageHide = () => this.saveProgress();
     window.addEventListener("pagehide", this.onPageHide);
+    if (newCharacterName !== null) this.saveProgress();
+    if (this.developmentMode && !this.adminPanel) {
+      this.adminPanel = new AdminPanel(this);
+      window.addEventListener("keydown", (e) => {
+        if (e.code === "F10" && this.developmentMode && !this.classSelectionActive) { e.preventDefault(); this.adminPanel.toggle(); }
+      });
+    }
   }
 
   start() {
     if (this.isRunning) return;
     this.isRunning = true;
+    if (!this._frameBound) { this.frame = this.frame.bind(this); this._frameBound = true; }
     requestAnimationFrame(this.frame);
+  }
+
+  setupCharacterCreation() {
+    const screen = document.querySelector("#character-creation");
+    if (!screen) return;
+    this.creationScreen = screen;
+    this.creationNameInput = screen.querySelector("#character-name");
+    this.creationError = screen.querySelector("#character-name-error");
+    this.creationConfirm = screen.querySelector("#confirm-character");
+    this.creationCards = [...screen.querySelectorAll("[data-class-id]")];
+
+    for (const card of this.creationCards) {
+      const classData = ClassConfig.classes[card.dataset.classId];
+      const weapon = ItemConfig.items[classData.starterWeaponId];
+      card.querySelector("[data-role='style']").textContent = classData.combatStyle;
+      card.querySelector("[data-role='stats']").textContent = `HP ${classData.initialStats.maxHp} · MP ${classData.initialStats.maxMp} · Công ${classData.initialStats.attack} · Thủ ${classData.initialStats.defense} · Thần ${classData.initialStats.spirit}`;
+      card.querySelector("[data-role='weapon']").textContent = `Vũ khí: ${weapon?.name ?? "Chưa xác định"}`;
+      card.querySelector("[data-role='skills']").textContent = `Bộ kỹ năng: ${classData.skills.map((skill) => skill.name).join(" · ")}`;
+      card.addEventListener("click", () => this.selectCreationClass(card.dataset.classId));
+    }
+
+    this.creationNameInput.addEventListener("keydown", (e) => e.stopPropagation());
+    this.creationNameInput.addEventListener("keyup", (e) => e.stopPropagation());
+    this.creationNameInput.addEventListener("input", () => this.validateCreationForm());
+    screen.querySelector("#back-character").addEventListener("click", () => {
+      this.creationNameInput.value = "";
+      this.classSelectionIndex = 0;
+      this.selectCreationClass(this.classIds[0]);
+      this.validateCreationForm();
+      this.creationNameInput.focus();
+    });
+    screen.querySelector("form").addEventListener("submit", (event) => {
+      event.preventDefault();
+      const validation = this.validateCharacterName(this.creationNameInput.value);
+      if (!validation.valid) return this.validateCreationForm();
+      this.initializeGame(this.classIds[this.classSelectionIndex], validation.name);
+    });
+    screen.addEventListener("keydown", (event) => {
+      if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+        event.preventDefault(); event.stopPropagation();
+        const direction = event.key === "ArrowLeft" ? -1 : 1;
+        this.classSelectionIndex = (this.classSelectionIndex + direction + this.classIds.length) % this.classIds.length;
+        this.selectCreationClass(this.classIds[this.classSelectionIndex]);
+      } else if (event.key === "Escape") {
+        event.preventDefault(); event.stopPropagation();
+        screen.querySelector("#back-character").click();
+      } else if (event.key === "Enter" && event.target !== this.creationNameInput) {
+        event.stopPropagation();
+      }
+    });
+    screen.hidden = false;
+    this.selectCreationClass(this.classIds[0]);
+    this.validateCreationForm();
+    requestAnimationFrame(() => this.creationNameInput.focus());
+  }
+
+  teardownCharacterCreation() {
+    if (this.creationScreen) this.creationScreen.hidden = true;
+    this.input.clear();
+  }
+
+  selectCreationClass(classId) {
+    const index = this.classIds.indexOf(classId);
+    if (index < 0) return;
+    this.classSelectionIndex = index;
+    for (const card of this.creationCards ?? []) {
+      const selected = card.dataset.classId === classId;
+      card.classList.toggle("is-selected", selected);
+      card.setAttribute("aria-pressed", String(selected));
+      card.querySelector("[data-role='selection']").textContent = selected ? "✓ Đang chọn" : "Chọn môn phái";
+    }
+    this.validateCreationForm();
+  }
+
+  validateCharacterName(value) {
+    const name = value.trim().replace(/\s+/g, " ");
+    if (name.length < 2 || name.length > 20) return { valid: false, name, error: "Tên phải có từ 2 đến 20 ký tự." };
+    if (!/^[\p{L}\p{M}][\p{L}\p{M} .'-]*$/u.test(name)) return { valid: false, name, error: "Tên chỉ dùng chữ cái, khoảng trắng, dấu chấm, nháy hoặc gạch nối." };
+    return { valid: true, name, error: "" };
+  }
+
+  validateCreationForm() {
+    if (!this.creationNameInput) return false;
+    const result = this.validateCharacterName(this.creationNameInput.value);
+    this.creationError.textContent = this.creationNameInput.value.length ? result.error : "Nhập tên để tiếp tục.";
+    this.creationNameInput.setAttribute("aria-invalid", String(!result.valid));
+    this.creationConfirm.disabled = !result.valid || this.classSelectionIndex < 0;
+    return result.valid;
+  }
+
+  updateClassSelection() {
+    this.input.clear();
+  }
+
+  renderClassSelection() {
+    const ctx = this.renderer.context;
+    ctx.clearRect(0, 0, this.renderer.width, this.renderer.height);
+    ctx.fillStyle = "rgb(5 14 11)";
+    ctx.fillRect(0, 0, this.renderer.width, this.renderer.height);
+    ctx.save();
+    ctx.textAlign = "center";
+    ctx.fillStyle = "#e8c96f";
+    ctx.font = "600 42px Georgia, serif";
+    ctx.fillText("Khởi tạo linh mạch", 960, 300);
+    ctx.fillStyle = "#9fc5ad";
+    ctx.font = "20px system-ui, sans-serif";
+    ctx.fillText("Tân đệ tử đang ghi danh tại Tĩnh Lam Môn", 960, 350);
+    ctx.restore();
   }
 
   frame(timestamp) {
@@ -126,6 +311,15 @@ export class Game {
   }
 
   update(deltaTime) {
+    if (this.classSelectionActive) {
+      this.updateClassSelection();
+      return;
+    }
+    if (this.adminPanel?.open) {
+      this.player.update(deltaTime, { x: 0, y: 0 });
+      this.camera.update(this.player, deltaTime);
+      return;
+    }
     const interactPressed = this.input.consumeAction("interact");
     const escapePressed = this.input.consumeAction("closePanel");
     const basicAttackPressed = this.input.consumeBasicAttack();
@@ -153,11 +347,17 @@ export class Game {
     const companionAssistPressed = this.input.consumeAction("companionAssist");
     const treasureActivatePressed = this.input.consumeAction("treasureActivate");
     const debugResetSavePressed = this.input.consumeAction("debugResetSave");
+    const worldMapPressed = this.input.consumeAction("worldMap");
+    const audioPanelPressed = this.input.consumeAction("audioPanel");
+    const debugOverlayPressed = this.input.consumeAction("debugOverlay");
+    if (debugOverlayPressed) { this.ui.showDebug = !this.ui.showDebug; this.settings.showDebug = this.ui.showDebug; this.saveSystem.saveSettings({ ...this.audioSystem.getPersistentState(), showDebug: this.ui.showDebug }); }
 
     if (this.resetConfirmOpen) {
       this.player.update(deltaTime, { x: 0, y: 0 });
       if (panelConfirmPressed) {
         this.saveSystem.clear();
+        window.removeEventListener("pagehide", this.onPageHide);
+        this.onPageHide = () => {};
         window.location.reload();
         return;
       }
@@ -171,29 +371,38 @@ export class Game {
       return;
     }
 
-    this.combat.update(deltaTime, this.player);
+    this.combat.update(deltaTime, this.player, this.enemies, this.world.obstacles);
     this.progression.update(deltaTime);
     this.skillSystem.update(deltaTime);
     this.inventorySystem.update(deltaTime);
     this.questSystem.update(deltaTime);
-    this.questSystem.updateArea(this.player);
+    this.questSystem.updateArea(this.player, this.mapSystem.currentMapId);
+    this.mapSystem.update(deltaTime);
     if (this.activitySystem.update(deltaTime, this.player, this.progression)) this.saveProgress();
-    if (this.craftingSystem.update(deltaTime, this.player)) this.saveProgress();
-    const isBlocked = this.craftingSystem.panelOpen || this.activitySystem.panelOpen || this.interaction.isDialogueOpen || this.questSystem.panelOpen || this.inventorySystem.panelOpen || this.skillSystem.panelOpen || this.progression.panelOpen || this.companionSystem.panelOpen;
+    if (this.craftingSystem.update(deltaTime, this.player)) { this.audioSystem.play("craft"); this.saveProgress(); }
+    const isBlocked = this.audioSystem.panelOpen || this.craftingSystem.panelOpen || this.activitySystem.panelOpen || this.interaction.isDialogueOpen || this.questSystem.panelOpen || this.inventorySystem.panelOpen || this.skillSystem.panelOpen || this.progression.panelOpen || this.companionSystem.panelOpen;
     this.companionSystem.update(deltaTime, this.player, this.enemies, this.combat, isBlocked);
     const pointerAction = this.ui.getPointerAction(pointerClick);
 
-    if (this.craftingSystem.panelOpen) {
+    if (this.audioSystem.panelOpen) {
+      this.player.update(deltaTime, { x: 0, y: 0 });
+      if (escapePressed || audioPanelPressed) this.audioSystem.togglePanel();
+      else { if (panelPreviousPressed) this.audioSystem.moveSelection(-1); if (panelNextPressed) this.audioSystem.moveSelection(1); if (panelDecreasePressed) this.audioSystem.adjust(-1); if (panelIncreasePressed) this.audioSystem.adjust(1); if (panelConfirmPressed) this.audioSystem.adjust(this.audioSystem.selected === 2 ? 1 : 0); this.saveSystem.saveSettings({ ...this.audioSystem.getPersistentState(), showDebug: this.ui.showDebug }); }
+    } else if (this.craftingSystem.panelOpen) {
       this.player.update(deltaTime, { x: 0, y: 0 });
       if (escapePressed) this.craftingSystem.close();
-      else { if (panelPreviousPressed) this.craftingSystem.moveSelection(-1); if (panelNextPressed) this.craftingSystem.moveSelection(1); if (panelConfirmPressed) this.craftingSystem.confirm(this.player); }
+      else { if (panelPreviousPressed) this.craftingSystem.moveSelection(-1); if (panelNextPressed) this.craftingSystem.moveSelection(1); if (panelConfirmPressed) { const started = this.craftingSystem.confirm(this.player); this.audioSystem.play(started ? "craft" : "fail"); } }
     } else if (this.activitySystem.panelOpen) {
       this.player.update(deltaTime, { x: 0, y: 0 });
       if (escapePressed) this.activitySystem.close();
       else { if (panelPreviousPressed) this.activitySystem.moveSelection(-1); if (panelNextPressed) this.activitySystem.moveSelection(1); if (panelConfirmPressed) this.activitySystem.confirm(this.player); }
     } else if (this.interaction.isDialogueOpen) {
       this.player.update(deltaTime, { x: 0, y: 0 });
-      if (interactPressed || escapePressed) this.interaction.closeDialogue();
+      if (interactPressed && this.mapSystem.pendingExit) { const transition = this.mapSystem.transition(this.player); this.interaction.closeDialogue(); if (transition) this.loadMap(transition.map, transition.entry); }
+      else if (interactPressed || escapePressed) { this.mapSystem.cancel(); this.interaction.closeDialogue(); }
+    } else if (this.mapSystem.worldMapOpen) {
+      this.player.update(deltaTime, { x: 0, y: 0 });
+      if (escapePressed || worldMapPressed) this.mapSystem.toggleWorldMap();
     } else if (this.questSystem.panelOpen) {
       this.player.update(deltaTime, { x: 0, y: 0 });
       if (escapePressed || questPanelPressed) this.questSystem.closePanel();
@@ -255,6 +464,10 @@ export class Game {
       this.player.update(deltaTime, { x: 0, y: 0 });
       if (escapePressed || companionPanelPressed) this.companionSystem.closePanel();
       else if (companionAssistPressed) { this.companionSystem.toggleAssist(); this.saveProgress(); }
+    } else if (worldMapPressed && !this.player.defeated) {
+      this.player.update(deltaTime, { x: 0, y: 0 }); this.mapSystem.toggleWorldMap();
+    } else if (audioPanelPressed) {
+      this.player.update(deltaTime, { x: 0, y: 0 }); this.audioSystem.togglePanel();
     } else if (questPanelPressed && !this.player.defeated) {
       this.player.update(deltaTime, { x: 0, y: 0 });
       this.questSystem.togglePanel();
@@ -272,8 +485,10 @@ export class Game {
       this.player.update(deltaTime, { x: 0, y: 0 });
       this.inventorySystem.openPanel();
     } else {
-      const movement = this.player.defeated ? { x: 0, y: 0 } : this.input.getMovementAxis();
-      this.player.update(deltaTime, movement);
+      if (escapePressed && this.explorationSystem.gathering) this.explorationSystem.cancelGathering("Đã hủy thu thập.");
+      const movement = this.player.defeated || this.explorationSystem.gathering ? { x: 0, y: 0 } : this.input.getMovementAxis();
+      this.player.update(deltaTime, movement, this.world.obstacles);
+      if (this.explorationSystem.update(deltaTime, this.player, this.inventorySystem)) this.saveProgress();
       for (const enemy of this.enemies) enemy.update(deltaTime, this.player, this.combat);
       this.lootSystem.update(deltaTime, this.player, !this.player.defeated);
 
@@ -297,6 +512,14 @@ export class Game {
             this.activitySystem.open();
           } else if (["alchemy", "forge"].includes(this.interaction.nearbyTarget?.type)) {
             this.craftingSystem.open(this.interaction.nearbyTarget.type);
+          } else if (this.interaction.nearbyTarget?.type === "map-exit") {
+            if (this.enemies.some((enemy) => enemy.state === "chase" && !enemy.defeated)) this.interaction.dialogue = { speaker: "Không thể rời bản đồ", title: "Đang giao chiến", text: "Hãy thoát khỏi phạm vi truy đuổi của yêu thú trước khi lên đường." };
+            else this.interaction.dialogue = this.mapSystem.prepare(this.interaction.nearbyTarget, this.player);
+          } else if (this.interaction.nearbyTarget?.type === "resource") {
+            this.explorationSystem.startGathering(this.interaction.nearbyTarget);
+          } else if (this.interaction.nearbyTarget?.type === "poi") {
+            this.interaction.dialogue = this.explorationSystem.discover(this.interaction.nearbyTarget);
+            this.saveProgress();
           } else {
             const npc = this.interaction.nearbyTarget;
             if (npc?.type === "npc") {
@@ -304,6 +527,7 @@ export class Game {
               const questDialogue = this.questSystem.interactNpc(npc, this.player, this.inventorySystem, this.progression, this.companionSystem);
               if (questDialogue) {
                 this.interaction.dialogue = questDialogue;
+                this.audioSystem.play("quest");
                 this.saveProgress();
               } else {
                 this.interaction.interact();
@@ -313,11 +537,18 @@ export class Game {
             }
           }
         }
-        if (basicAttackPressed) this.combat.tryBasicAttack(this.player, this.enemies);
+        if (basicAttackPressed && !this.explorationSystem.gathering) {
+          const aimPoint = this.input.getWorldMousePos(this.camera);
+          this.faceMouseCursor();
+          this.combat.tryBasicAttack(this.player, this.enemies, aimPoint);
+        }
         const skills = this.skillSystem.getClass(this.player).skills;
         skills.forEach((skill) => {
-          if (skillRequests.get(skill.id)) {
-            this.skillSystem.tryActivate(this.player, this.enemies, skill, this.combat);
+          if (skillRequests.get(skill.id) && !this.explorationSystem.gathering) {
+            const aimPoint = this.input.getWorldMousePos(this.camera);
+            this.faceMouseCursor();
+            const activated = this.skillSystem.tryActivate(this.player, this.enemies, skill, this.combat, aimPoint, this.world.obstacles);
+            if (activated && skill.effect === "sky-radiance") this.camera.shake(8, 0.18);
           }
         });
         if (treasureActivatePressed) {
@@ -347,6 +578,10 @@ export class Game {
   }
 
   render() {
+    if (this.classSelectionActive) {
+      this.renderClassSelection();
+      return;
+    }
     if (this.resetConfirmOpen) {
       const ctx = this.renderer.context;
       ctx.clearRect(0, 0, this.renderer.width, this.renderer.height);
@@ -383,41 +618,39 @@ export class Game {
       this.lootSystem,
       this.companionSystem,
       ItemConfig,
+      this.mapSystem,
+      this.explorationSystem,
+      this.audioSystem,
       this.fps,
     );
   }
 
   createNpcs() {
-    return GameConfig.npcs.spawns.map((npcConfig) => new NPC(npcConfig));
+    return this.mapSystem.currentMap.npcSpawns.map((npcConfig) => new NPC(npcConfig));
+  }
+
+  loadMap(map, entry) {
+    this.world = new WorldSystem(map.world, map);
+    this.audioSystem.setMapTheme(map.world.theme);
+    this.audioSystem.play("map");
+    this.explorationSystem.loadMap(this.world.specialObjects);
+    this.player.worldConfig = map.world;
+    this.player.x = entry.x; this.player.y = entry.y;
+    this.player.spawnX = entry.x; this.player.spawnY = entry.y;
+    this.npcs = this.createNpcs(); this.enemies = this.createEnemies();
+    if (this.lootSystem) this.lootSystem.groundLoot = [];
+    if (this.combat) {
+      this.combat.effects = []; this.combat.floatingTexts = []; this.combat.projectiles = [];
+      this.combat.pendingStrikes = []; this.combat.pendingProjectiles = []; this.combat.healingZones = [];
+    }
+    if (this.interaction) { this.interaction.nearbyTarget = null; this.interaction.closeDialogue(); }
+    if (this.camera) { this.camera.worldWidth = map.world.width; this.camera.worldHeight = map.world.height; this.camera.snapTo(this.player); }
+    if (this.questSystem) this.questSystem.onVisit(map.id);
+    this.saveProgress();
   }
 
   createEnemies() {
-    return GameConfig.enemySpawns.map((spawn) => {
-      const enemyType = GameConfig.enemyTypes[spawn.enemyType];
-      const area = QuestConfig.areas.find((entry) => entry.id === spawn.areaId) ?? QuestConfig.areas[0];
-      return new Enemy({
-        id: spawn.id,
-        enemyType: spawn.enemyType,
-        name: enemyType.name,
-        species: enemyType.species,
-        x: spawn.x,
-        y: spawn.y,
-        speed: enemyType.movementSpeed,
-        maxHp: enemyType.maxHp,
-        damage: enemyType.damage,
-        attackRange: enemyType.attackRange,
-        attackCooldown: enemyType.attackCooldown,
-        attackWindup: enemyType.attackWindup,
-        expReward: enemyType.expReward,
-        lootTableId: enemyType.lootTableId,
-        respawnDelay: enemyType.respawnDelay,
-        collisionRadius: enemyType.collisionRadius,
-        territory: { x: area.minX, y: area.minY, width: area.maxX - area.minX, height: area.maxY - area.minY },
-        color: spawn.color,
-        detectionRange: enemyType.aggroRange,
-        leashRange: enemyType.returnDistance,
-      });
-    });
+    return this.enemySpawnSystem.loadMap(this.mapSystem.currentMapId, this.player);
   }
 
   restoreCharacter() {
@@ -433,8 +666,16 @@ export class Game {
       questConfig: QuestConfig,
       craftingConfig: CraftingConfig,
       companionConfig: CompanionConfig,
+      mapConfig: MapConfig,
     });
     this.player.applyPersistentState(savedCharacter);
+    this.mapSystem.initializePlayer(this.player);
+    this.explorationSystem.initialize(this.player.mapState?.exploration);
+    const loadedMap = this.mapSystem.currentMap;
+    const savedPosition = this.mapSystem.positions[this.mapSystem.currentMapId];
+    const defaultEntry = loadedMap.entries.start ?? Object.values(loadedMap.entries)[0];
+    const position = savedPosition ?? (this.mapSystem.currentMapId === MapConfig.defaultMapId ? { x: this.player.x, y: this.player.y } : defaultEntry);
+    this.player.worldConfig = loadedMap.world; this.player.x = position.x; this.player.y = position.y; this.player.spawnX = position.x; this.player.spawnY = position.y;
     this.progression.normalizeRealm(this.player);
     this.skillSystem.initializePlayer(this.player);
     this.inventorySystem.initializePlayer(this.player);
@@ -445,11 +686,23 @@ export class Game {
     this.progression.processLevelUps(this.player, true);
   }
 
+  faceMouseCursor() {
+    const world = this.input.getWorldMousePos(this.camera);
+    const dx = world.x - this.player.x;
+    const dy = world.y - this.player.y;
+    if (Math.abs(dx) >= Math.abs(dy)) {
+      this.player.facing = dx >= 0 ? "east" : "west";
+    } else {
+      this.player.facing = dy >= 0 ? "south" : "north";
+    }
+  }
+
   saveProgress() {
     if (this.player.defeated) return false;
     this.player.questState = this.questSystem.getPersistentState();
     this.player.activityState = this.activitySystem.getPersistentState();
     this.player.companionState = this.companionSystem.getPersistentState();
+    this.player.mapState = { ...this.mapSystem.getPersistentState(this.player), exploration: this.explorationSystem.getPersistentState() };
     return this.saveSystem.saveCharacter(this.player.getPersistentState());
   }
 

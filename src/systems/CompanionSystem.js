@@ -163,6 +163,7 @@ export class CompanionSystem {
       const damage = this.getDamage();
       combat.addDamageNumber(nearest.x, nearest.y - 60, damage, "#f5e6cc");
       combat.effects.push({ kind: "hit", x: nearest.x, y: nearest.y - 25, life: 0.2, duration: 0.2 });
+      combat.onEvent?.("companion", nearest.x, nearest.y);
       const wasDefeated = nearest.takeDamage(damage, { x: 0, y: 0 }, 0);
       if (wasDefeated) {
         combat.effects.push({ kind: "defeat", x: nearest.x, y: nearest.y, life: 0.55, duration: 0.55 });

@@ -89,13 +89,16 @@ export class AttributeSystem {
 
     return {
       physicalAttack: player.baseStats.attack + strengthBonus * effects.physicalAttackPerStrength + gear.physicalAttack,
+      spiritualPower: player.baseStats.spirit + spiritBonus,
       defense: player.baseStats.defense + constitutionBonus * effects.defensePerConstitution + gear.defense,
       maxHp: player.baseMaxHp + constitutionBonus * effects.maxHpPerConstitution + gear.maxHp,
       maxMp: player.baseMaxMp + spiritBonus * effects.maxMpPerSpirit + gear.maxMp,
       movementSpeed: player.baseMovementSpeed * (1 + movementBonus + gearMovement),
       attackSpeedMultiplier: 1 + attackSpeedBonus,
       skillDamageMultiplier: 1 + skillDamageBonus + gearSkillDamage,
-      swordDamageMultiplier: classData.passive.swordDamageMultiplier,
+      swordDamageMultiplier: classData.passive.swordDamageMultiplier ?? 1,
+      spiritDamageMultiplier: classData.passive.spiritDamageMultiplier ?? 1,
+      mpRegenPerSecond: classData.passive.mpRegenPerSecond ?? 0,
       equipmentBonuses: gear,
     };
   }

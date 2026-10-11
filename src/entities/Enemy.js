@@ -4,6 +4,8 @@ export class Enemy {
   constructor({
     id,
     enemyType,
+    level = 1,
+    zoneId = null,
     name,
     species,
     x,
@@ -11,6 +13,7 @@ export class Enemy {
     speed,
     maxHp,
     damage,
+    defense = 0,
     attackRange,
     attackCooldown,
     attackWindup,
@@ -25,6 +28,8 @@ export class Enemy {
   }) {
     this.id = id;
     this.enemyType = enemyType;
+    this.level = level;
+    this.zoneId = zoneId;
     this.type = "enemy";
     this.name = name;
     this.species = species;
@@ -36,6 +41,7 @@ export class Enemy {
     this.maxHp = maxHp;
     this.hp = maxHp;
     this.damage = damage;
+    this.defense = defense;
     this.attackRange = attackRange;
     this.attackCooldown = attackCooldown;
     this.attackWindup = attackWindup;
@@ -60,6 +66,7 @@ export class Enemy {
     this.knockbackY = 0;
     this.defeated = false;
     this.respawnRemaining = 0;
+    this.lastDamageTaken = 0;
   }
 
   update(deltaTime, player, combat) {
@@ -69,7 +76,7 @@ export class Enemy {
 
     if (this.defeated) {
       this.respawnRemaining -= deltaTime;
-      if (this.respawnRemaining <= 0) this.respawn();
+      if (this.respawnRemaining <= 0 && Math.hypot(player.x - this.spawnX, player.y - this.spawnY) > 280) this.respawn();
       return;
     }
 
@@ -141,7 +148,9 @@ export class Enemy {
 
   takeDamage(amount, direction, knockback) {
     if (this.defeated) return false;
-    this.hp = Math.max(0, this.hp - amount);
+    const mitigated = Math.max(1, Math.round(amount - this.defense * 0.45));
+    this.lastDamageTaken = mitigated;
+    this.hp = Math.max(0, this.hp - mitigated);
     this.hitFlashRemaining = 0.13;
     this.knockbackX += direction.x * knockback;
     this.knockbackY += direction.y * knockback;
@@ -185,7 +194,7 @@ export class Enemy {
     else this.drawMountainCat(ctx);
 
     const nearby = Math.hypot(player.x - this.x, player.y - this.y) <= 560;
-    if (nearby) this.drawHealthBar(ctx);
+    if (nearby || this.state === "chase" || this.hitFlashRemaining > 0) this.drawHealthBar(ctx, player);
     ctx.restore();
   }
 
@@ -236,15 +245,19 @@ export class Enemy {
     ctx.fill();
   }
 
-  drawHealthBar(ctx) {
+  drawHealthBar(ctx, player) {
     const width = 124;
     ctx.textAlign = "center";
     ctx.font = "600 18px system-ui, sans-serif";
     ctx.fillStyle = "#fff0ce";
     ctx.strokeStyle = "rgb(5 14 11 / 90%)";
     ctx.lineWidth = 5;
-    ctx.strokeText(this.name, 0, -116);
-    ctx.fillText(this.name, 0, -116);
+    const difference = this.level - player.level;
+    const warning = difference >= 6 ? " ⚠ NGUY HIỂM" : difference >= 3 ? " ▲ MẠNH" : "";
+    ctx.fillStyle = difference >= 6 ? "#ff937f" : difference >= 3 ? "#f0cf72" : "#fff0ce";
+    const label = `${this.name} · Lv.${this.level}${warning}`;
+    ctx.strokeText(label, 0, -116);
+    ctx.fillText(label, 0, -116);
     ctx.fillStyle = "rgb(7 15 13 / 88%)";
     ctx.fillRect(-width / 2, -103, width, 13);
     ctx.fillStyle = "#b95443";

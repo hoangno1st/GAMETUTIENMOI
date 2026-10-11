@@ -6,6 +6,7 @@ export class LootSystem {
     this.inventorySystem = inventorySystem;
     this.groundLoot = [];
     this.nextId = 1;
+    this.onPickup = null;
   }
 
   update(deltaTime, player, allowPickup = true) {
@@ -55,7 +56,7 @@ export class LootSystem {
     } else if (loot.itemId) {
       pickedUp = this.inventorySystem.addItem(player, loot.itemId, loot.quantity);
     }
-    if (pickedUp) this.groundLoot = this.groundLoot.filter((entry) => entry !== loot);
+    if (pickedUp) { this.groundLoot = this.groundLoot.filter((entry) => entry !== loot); this.onPickup?.(loot); }
     return pickedUp;
   }
 }

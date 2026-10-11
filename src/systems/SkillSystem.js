@@ -91,7 +91,12 @@ export class SkillSystem {
     return true;
   }
 
-  tryActivate(player, enemies, skill, combat) {
+  tryActivate(player, enemies, skill, combat, aimPoint, obstacles = []) {
+    const classData = this.getClass(player);
+    if (!classData.skills.some((ownedSkill) => ownedSkill.id === skill?.id)) {
+      this.addFeedback("Kỹ năng không thuộc hệ phái hiện tại", "warning");
+      return false;
+    }
     const level = this.getSkillLevel(player, skill);
     if (player.level < skill.requiredLevel || level <= 0) {
       this.addFeedback(`${skill.name} chưa được học`, "warning");
@@ -108,13 +113,25 @@ export class SkillSystem {
       return false;
     }
 
+    const validation = combat.validateSkillCast(player, enemies, skill, levelData, aimPoint, obstacles);
+    if (!validation.valid) {
+      this.addFeedback(validation.message, "warning");
+      return false;
+    }
+
     player.mp -= levelData.mpCost;
     this.cooldowns[skill.id] = levelData.cooldown;
-    const hitCount = combat.executeSkill(player, enemies, skill, levelData);
-    this.addFeedback(
-      hitCount > 0 ? `${skill.name} trúng ${hitCount} mục tiêu` : `${skill.name} không trúng mục tiêu`,
-      hitCount > 0 ? "success" : "neutral",
-    );
+    const hitCount = combat.executeSkill(player, enemies, skill, levelData, aimPoint, validation.context);
+    if (skill.targetMode === "self") {
+      this.addFeedback(`${skill.name} đã được triển khai`, "success");
+    } else if (hitCount < 0) {
+      this.addFeedback(`${skill.name} đã được thi triển`, "success");
+    } else {
+      this.addFeedback(
+        hitCount > 0 ? `${skill.name} trúng ${hitCount} mục tiêu` : `${skill.name} không trúng mục tiêu`,
+        hitCount > 0 ? "success" : "neutral",
+      );
+    }
     return true;
   }
 

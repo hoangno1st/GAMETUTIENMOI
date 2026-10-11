@@ -2,9 +2,9 @@ export const CompanionConfig = Object.freeze({
   companions: Object.freeze({
     "linh-ho-tieu-bach": Object.freeze({
       id: "linh-ho-tieu-bach",
-      name: "Tiểu Bạch",
-      species: "Linh Hồ",
-      description: "Chú hồ ly nhỏ có linh trí, theo chân tu sĩ sau khi được cứu từ rừng linh thảo.",
+      name: "Mầm Sương",
+      species: "Diệp Vĩ Ly",
+      description: "Linh thú đuôi lá sinh bên mạch sương, theo An Kha sau khi được cứu khỏi bầy Nham Bì Ly.",
       baseHp: 50,
       hpPerLevel: 8,
       baseDamage: 4,
